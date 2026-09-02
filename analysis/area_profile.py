@@ -15,6 +15,9 @@ MAPPING_PATH = "data/reference/adm_cd_mapping.csv"
 SCHOOLS_PATH = "data/processed/schools.parquet"
 SCHOOL_LEVELS = ["초등학교", "중학교", "고등학교"]
 
+LIBRARIES_PATH = "data/processed/libraries.parquet"
+LIBRARY_GROUPS = ["주요도서관", "작은도서관", "기타"]
+
 # Windows 콘솔에서 한글 출력이 깨지는 것을 방지
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -88,6 +91,29 @@ def get_facilities_in_circle(center_lat, center_lon, radius_km, schools_path=SCH
     return {"counts": counts, "schools": in_circle}
 
 
+def get_libraries_in_circle(center_lat, center_lon, radius_km, libraries_path=LIBRARIES_PATH):
+    """생활권 원 안에 있는 도서관을 그룹별(주요도서관/작은도서관/기타)로 정리해서 반환한다.
+
+    반환: dict
+      - counts: {"주요도서관": N, "작은도서관": N, "기타": N}
+      - libraries: DataFrame (library_name, library_type, group, lat, lon, distance_km),
+        거리 가까운 순 정렬
+    """
+    libraries = pd.read_parquet(libraries_path)
+
+    distance_km = _haversine_km(center_lat, center_lon, libraries["lat"].values, libraries["lon"].values)
+    libraries = libraries.assign(distance_km=distance_km)
+
+    in_circle = (
+        libraries[libraries["distance_km"] <= radius_km].sort_values("distance_km").reset_index(drop=True)
+    )
+
+    group_counts = in_circle["group"].value_counts()
+    counts = {group: int(group_counts.get(group, 0)) for group in LIBRARY_GROUPS}
+
+    return {"counts": counts, "libraries": in_circle}
+
+
 if __name__ == "__main__":
     from analysis.living_area import get_dongs_in_circle
 
@@ -112,3 +138,9 @@ if __name__ == "__main__":
           f"중 {facilities['counts']['중학교']}개 / 고 {facilities['counts']['고등학교']}개")
     print("\n가까운 순 10개:")
     print(facilities["schools"].head(10))
+
+    libraries = get_libraries_in_circle(center_lat, center_lon, radius_km)
+    print(f"\n생활권 도서관: 주요도서관 {libraries['counts']['주요도서관']}개 / "
+          f"작은도서관 {libraries['counts']['작은도서관']}개 / 기타 {libraries['counts']['기타']}개")
+    print("\n가까운 순 10개:")
+    print(libraries["libraries"].head(10))

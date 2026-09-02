@@ -9,7 +9,11 @@ import folium
 import streamlit as st
 from streamlit_folium import st_folium
 
-from analysis.area_profile import get_facilities_in_circle, get_living_area_population
+from analysis.area_profile import (
+    get_facilities_in_circle,
+    get_libraries_in_circle,
+    get_living_area_population,
+)
 from analysis.living_area import calc_radius_km, get_dong_geometries, get_dongs_in_circle
 from services.kakao_service import find_location
 
@@ -110,9 +114,14 @@ st.markdown(
         background: linear-gradient(135deg, #EFF5EE 0%, #E3EDE0 100%);
         border: 1px solid #D6E6D2;
     }
+    .kpi-amber {
+        background: linear-gradient(135deg, #F7F0E6 0%, #F0E4D0 100%);
+        border: 1px solid #E8D5B7;
+    }
     .kpi-blue .kpi-value { color: #3E7C91; }
     .kpi-pink .kpi-value { color: #C97B8E; }
     .kpi-green .kpi-value { color: #5C8A6B; }
+    .kpi-amber .kpi-value { color: #A97C50; }
     .kpi-unit {
         font-family: 'Noto Sans KR', sans-serif;
         font-size: 1.05rem;
@@ -201,6 +210,7 @@ if selected:
     dongs = get_dongs_in_circle(lat, lon, radius_km)
     dong_geometries = get_dong_geometries(dongs["ADM_CD"].tolist())
     facilities = get_facilities_in_circle(lat, lon, radius_km)
+    libraries_nearby = get_libraries_in_circle(lat, lon, radius_km)
 
     m = folium.Map(location=[lat, lon], zoom_start=13)
 
@@ -256,6 +266,24 @@ if selected:
             tooltip=school["school_name"],
         ).add_to(m)
 
+    # 도서관은 학교(원형 점)와 구분되도록 각진 모양으로 표시
+    library_colors = {"주요도서관": "#B08968", "작은도서관": "#D4A657", "기타": "#8A8178"}
+    for _, library in libraries_nearby["libraries"].iterrows():
+        color = library_colors.get(library["group"], "#8A8178")
+        icon_html = (
+            '<div style="'
+            "width: 14px; height: 14px;"
+            f"background-color: {color};"
+            'border: 2px solid #FAF7F2;'
+            "border-radius: 4px;"
+            'box-shadow: 0 1px 4px rgba(0,0,0,0.35);"></div>'
+        )
+        folium.Marker(
+            location=[library["lat"], library["lon"]],
+            tooltip=library["library_name"],
+            icon=folium.DivIcon(html=icon_html, icon_size=(14, 14), icon_anchor=(7, 7)),
+        ).add_to(m)
+
     # 반경이 화면에 딱 맞게 보이도록 위도/경도 범위를 계산해서 자동 줌 조정
     delta_lat = radius_km / 111
     delta_lon = radius_km / (111 * math.cos(math.radians(lat)))
@@ -264,7 +292,7 @@ if selected:
 
     st_folium(m, height=420, use_container_width=True)
     st.caption(f"📍 직선거리 기준 약 {radius_km:.1f} km 범위 (실제 도로 이동거리와 다를 수 있음)")
-    st.caption("🟢 초등학교 · 🟣 중학교 · 🟠 고등학교")
+    st.caption("🟢 초등학교 · 🟣 중학교 · 🟠 고등학교 　 🟤 공공·어린이도서관 · 🟡 작은도서관 (■ 사각형)")
 
     st.subheader("생활권 인구")
 
@@ -305,6 +333,13 @@ if selected:
     kpi_card(edu_col1, "초등학교", f"{counts['초등학교']}", "개", "green")
     kpi_card(edu_col2, "중학교", f"{counts['중학교']}", "개", "green")
     kpi_card(edu_col3, "고등학교", f"{counts['고등학교']}", "개", "green")
+
+    st.subheader("생활권 문화시설")
+
+    library_counts = libraries_nearby["counts"]
+    culture_col1, culture_col2 = st.columns(2)
+    kpi_card(culture_col1, "공공·어린이도서관", f"{library_counts['주요도서관']}", "개", "amber")
+    kpi_card(culture_col2, "작은도서관", f"{library_counts['작은도서관']}", "개", "amber")
 
     st.subheader(f"생활권 포함 행정동 (총 {len(dongs)}개)")
     if dongs.empty:
