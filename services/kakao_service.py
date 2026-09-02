@@ -17,8 +17,11 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 
-def _search(url, query):
-    """카카오 로컬 API를 호출해서 documents 리스트를 반환한다. 실패 시 None을 반환한다."""
+def _request(url, params):
+    """카카오 로컬 API를 한 번 호출해서 응답 JSON 전체(documents, meta)를 반환한다.
+
+    실패 시 None을 반환한다.
+    """
     load_dotenv()
     api_key = os.getenv("KAKAO_REST_KEY")
 
@@ -27,7 +30,6 @@ def _search(url, query):
         return None
 
     headers = {"Authorization": f"KakaoAK {api_key}"}
-    params = {"query": query}
 
     try:
         response = requests.get(url, headers=headers, params=params, timeout=10)
@@ -40,7 +42,15 @@ def _search(url, query):
         print(f"응답 본문: {response.text}")
         return None
 
-    return response.json().get("documents", [])
+    return response.json()
+
+
+def _search(url, query):
+    """카카오 로컬 API를 호출해서 documents 리스트를 반환한다. 실패 시 None을 반환한다."""
+    data = _request(url, {"query": query})
+    if data is None:
+        return None
+    return data.get("documents", [])
 
 
 def address_to_coord(address):
@@ -67,6 +77,50 @@ def search_places(keyword):
     return [
         (doc["place_name"], doc["address_name"], float(doc["y"]), float(doc["x"]))
         for doc in documents[:10]
+    ]
+
+
+MAX_NEARBY_PAGES = 3  # 카카오 페이지당 최대 15개 x 3페이지 = 최대 45개
+
+
+def search_places_nearby(keyword, center_lat, center_lon, radius_m):
+    """기준 좌표 주변 radius_m(m) 이내에서 키워드로 장소를 검색한다 (최대 45개, 페이지네이션).
+
+    반환: (장소명, 카테고리, 주소, 위도, 경도, 거리(m)) 튜플의 리스트. 실패 시 빈 리스트.
+    """
+    all_documents = []
+
+    for page in range(1, MAX_NEARBY_PAGES + 1):
+        params = {
+            "query": keyword,
+            "x": center_lon,
+            "y": center_lat,
+            "radius": min(radius_m, 20000),
+            "page": page,
+        }
+        data = _request(KEYWORD_API_URL, params)
+        if data is None:
+            break
+
+        all_documents.extend(data.get("documents", []))
+
+        if data.get("meta", {}).get("is_end", True):
+            break
+
+    if not all_documents:
+        print("검색 결과를 찾을 수 없습니다")
+        return []
+
+    return [
+        (
+            doc["place_name"],
+            doc["category_name"],
+            doc["address_name"],
+            float(doc["y"]),
+            float(doc["x"]),
+            float(doc["distance"]) if doc.get("distance") else None,
+        )
+        for doc in all_documents
     ]
 
 
@@ -105,3 +159,9 @@ if __name__ == "__main__":
             for name, addr, lat, lon in candidates:
                 print(f"  - {name} ({addr}) 위도: {lat}, 경도: {lon}")
         print()
+
+    print("--- 포항시청 반경 5000m 이내 '키즈카페' 검색 ---")
+    nearby = search_places_nearby("키즈카페", 36.019, 129.343, 5000)
+    print(f"{len(nearby)}개 결과")
+    for place_name, category_name, address_name, lat, lon, distance in nearby[:10]:
+        print(f"  - {place_name} ({address_name}) 거리: {distance}m")

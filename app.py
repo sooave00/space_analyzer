@@ -7,12 +7,15 @@ import math
 
 import folium
 import streamlit as st
-from streamlit_folium import st_folium
+from folium.plugins import MarkerCluster
+from streamlit_folium import folium_static
 
 from analysis.area_profile import (
     get_facilities_in_circle,
     get_libraries_in_circle,
     get_living_area_population,
+    get_nearby_facilities_kakao,
+    get_tourism_in_circle,
 )
 from analysis.living_area import calc_radius_km, get_dong_geometries, get_dongs_in_circle
 from services.kakao_service import find_location
@@ -118,10 +121,35 @@ st.markdown(
         background: linear-gradient(135deg, #F7F0E6 0%, #F0E4D0 100%);
         border: 1px solid #E8D5B7;
     }
+    .kpi-lavender {
+        background: linear-gradient(135deg, #EEF0F9 0%, #E4E7F5 100%);
+        border: 1px solid #D3D8ED;
+    }
+    .kpi-teal {
+        background: linear-gradient(135deg, #E9F4F3 0%, #DCEEEC 100%);
+        border: 1px solid #C7E3E0;
+    }
+    .kpi-rose {
+        background: linear-gradient(135deg, #FBEBEC 0%, #F6DBDD 100%);
+        border: 2px solid #E0637A;
+    }
+    .kpi-violet {
+        background: linear-gradient(135deg, #F0EBF7 0%, #E6DCF2 100%);
+        border: 1px solid #D8C7EA;
+    }
+    .kpi-tangerine {
+        background: linear-gradient(135deg, #FBEEDF 0%, #F6E0C7 100%);
+        border: 1px solid #ECCB9E;
+    }
     .kpi-blue .kpi-value { color: #3E7C91; }
     .kpi-pink .kpi-value { color: #C97B8E; }
     .kpi-green .kpi-value { color: #5C8A6B; }
     .kpi-amber .kpi-value { color: #A97C50; }
+    .kpi-lavender .kpi-value { color: #5D69A8; }
+    .kpi-teal .kpi-value { color: #3E8C82; }
+    .kpi-rose .kpi-value { color: #C94D63; }
+    .kpi-violet .kpi-value { color: #6F4F96; }
+    .kpi-tangerine .kpi-value { color: #B87332; }
     .kpi-unit {
         font-family: 'Noto Sans KR', sans-serif;
         font-size: 1.05rem;
@@ -133,6 +161,16 @@ st.markdown(
         div[data-testid="stHorizontalBlock"] {
             flex-direction: column;
         }
+    }
+
+    /* 지도 클릭 시 브라우저 기본 focus outline(네모 테두리) 제거 */
+    iframe,
+    iframe:focus,
+    .folium-map,
+    .folium-map:focus,
+    [class*="stCustomComponent"],
+    [class*="stCustomComponent"]:focus {
+        outline: none !important;
     }
     </style>
     """,
@@ -211,6 +249,26 @@ if selected:
     dong_geometries = get_dong_geometries(dongs["ADM_CD"].tolist())
     facilities = get_facilities_in_circle(lat, lon, radius_km)
     libraries_nearby = get_libraries_in_circle(lat, lon, radius_km)
+    tourism_nearby = get_tourism_in_circle(lat, lon, radius_km)
+
+    radius_m = min(radius_km * 1000, 20000)
+    kakao_cache = st.session_state.setdefault("kakao_cache", {})
+    kakao_cache_key = (round(lat, 5), round(lon, 5), round(radius_m))
+    if kakao_cache_key not in kakao_cache:
+        with st.spinner("카카오에서 주변 시설을 검색하는 중..."):
+            kakao_cache[kakao_cache_key] = get_nearby_facilities_kakao(lat, lon, radius_m)
+    kakao_nearby = kakao_cache[kakao_cache_key]
+
+    st.caption("지도에 표시할 시설 (기본: 학교·도서관만 켜짐)")
+    tg1, tg2, tg3, tg4, tg5, tg6 = st.columns(6)
+    show_layers = {
+        "학교": tg1.checkbox("🏫 학교", value=True, key="show_school"),
+        "도서관": tg2.checkbox("📚 도서관", value=True, key="show_library"),
+        "관광명소": tg3.checkbox("🎡 관광명소", value=False, key="show_kakao_tourist"),
+        "키즈카페": tg4.checkbox("🧸 키즈카페", value=False, key="show_kakao_kids"),
+        "문화체험": tg5.checkbox("🏛️ 문화체험", value=False, key="show_kakao_culture"),
+        "집객시설": tg6.checkbox("🛍️ 집객시설", value=False, key="show_kakao_crowd"),
+    }
 
     m = folium.Map(location=[lat, lon], zoom_start=13)
 
@@ -254,35 +312,54 @@ if selected:
             tooltip=folium.GeoJsonTooltip(fields=["ADM_NM"], aliases=["행정동"]),
         ).add_to(m)
 
-    school_colors = {"초등학교": "#4C9A8E", "중학교": "#7B6FA8", "고등학교": "#C97B4A"}
-    for _, school in facilities["schools"].iterrows():
-        folium.CircleMarker(
-            location=[school["lat"], school["lon"]],
-            radius=5,
-            color=school_colors.get(school["school_level"], "#8A8178"),
-            fill=True,
-            fill_opacity=0.85,
-            weight=1,
-            tooltip=school["school_name"],
-        ).add_to(m)
+    def emoji_icon(emoji):
+        html = f'<div style="font-size: 20px; line-height: 1; text-align: center;">{emoji}</div>'
+        return folium.DivIcon(html=html, icon_size=(24, 24), icon_anchor=(12, 20))
 
-    # 도서관은 학교(원형 점)와 구분되도록 각진 모양으로 표시
-    library_colors = {"주요도서관": "#B08968", "작은도서관": "#D4A657", "기타": "#8A8178"}
-    for _, library in libraries_nearby["libraries"].iterrows():
-        color = library_colors.get(library["group"], "#8A8178")
-        icon_html = (
-            '<div style="'
-            "width: 14px; height: 14px;"
-            f"background-color: {color};"
-            'border: 2px solid #FAF7F2;'
-            "border-radius: 4px;"
-            'box-shadow: 0 1px 4px rgba(0,0,0,0.35);"></div>'
-        )
-        folium.Marker(
-            location=[library["lat"], library["lon"]],
-            tooltip=library["library_name"],
-            icon=folium.DivIcon(html=icon_html, icon_size=(14, 14), icon_anchor=(7, 7)),
-        ).add_to(m)
+    if show_layers["학교"]:
+        school_cluster = MarkerCluster(name="학교").add_to(m)
+        for _, school in facilities["schools"].iterrows():
+            folium.Marker(
+                location=[school["lat"], school["lon"]],
+                tooltip=school["school_name"],
+                icon=emoji_icon("🏫"),
+            ).add_to(school_cluster)
+
+    if show_layers["도서관"]:
+        library_cluster = MarkerCluster(name="도서관").add_to(m)
+        for _, library in libraries_nearby["libraries"].iterrows():
+            folium.Marker(
+                location=[library["lat"], library["lon"]],
+                tooltip=library["library_name"],
+                icon=emoji_icon("📚"),
+            ).add_to(library_cluster)
+
+    # 공식 지정 관광지(STEP 5-C)는 항상 표시 - 카카오 관광명소와 구분되는 별도 이모지
+    if not tourism_nearby["tourism"].empty:
+        tourism_cluster = MarkerCluster(name="관광지(공식)").add_to(m)
+        for _, spot in tourism_nearby["tourism"].iterrows():
+            folium.Marker(
+                location=[spot["lat"], spot["lon"]],
+                tooltip=spot["name"],
+                icon=emoji_icon("🏞️"),
+            ).add_to(tourism_cluster)
+
+    kakao_emojis = {
+        "관광명소": "🎡",
+        "키즈카페": "🧸",
+        "문화체험": "🏛️",
+        "집객시설": "🛍️",
+    }
+    for category, data in kakao_nearby.items():
+        if not show_layers.get(category):
+            continue
+        cluster = MarkerCluster(name=category).add_to(m)
+        for place_name, category_name, address_name, place_lat, place_lon, distance in data["places"]:
+            folium.Marker(
+                location=[place_lat, place_lon],
+                tooltip=place_name,
+                icon=emoji_icon(kakao_emojis[category]),
+            ).add_to(cluster)
 
     # 반경이 화면에 딱 맞게 보이도록 위도/경도 범위를 계산해서 자동 줌 조정
     delta_lat = radius_km / 111
@@ -290,9 +367,14 @@ if selected:
     bounds = [[lat - delta_lat, lon - delta_lon], [lat + delta_lat, lon + delta_lon]]
     m.fit_bounds(bounds)
 
-    st_folium(m, height=420, use_container_width=True)
+    # folium_static은 클릭 이벤트를 아예 캡처하지 않는 정적 렌더링이라 클릭 시 사각형이 생기지 않음
+    # (width=None이면 st_folium의 use_container_width=True와 동일하게 화면 폭에 맞춰짐)
+    folium_static(m, width=None, height=420)
     st.caption(f"📍 직선거리 기준 약 {radius_km:.1f} km 범위 (실제 도로 이동거리와 다를 수 있음)")
-    st.caption("🟢 초등학교 · 🟣 중학교 · 🟠 고등학교 　 🟤 공공·어린이도서관 · 🟡 작은도서관 (■ 사각형)")
+    st.caption(
+        "🏫 학교 · 📚 도서관 · 🏞️ 관광지(공식) 　 카카오 실시간: 🎡 관광명소 · 🧸 키즈카페 · 🏛️ 문화체험 · 🛍️ 집객시설"
+    )
+    st.caption("숫자 원은 확대하면 개별 마커로 펼쳐지는 클러스터입니다")
 
     st.subheader("생활권 인구")
 
@@ -340,6 +422,30 @@ if selected:
     culture_col1, culture_col2 = st.columns(2)
     kpi_card(culture_col1, "공공·어린이도서관", f"{library_counts['주요도서관']}", "개", "amber")
     kpi_card(culture_col2, "작은도서관", f"{library_counts['작은도서관']}", "개", "amber")
+
+    st.subheader("생활권 관광자원")
+
+    tourism_count = tourism_nearby["count"]
+    if tourism_count == 0:
+        st.info("이 생활권에는 공식 지정 관광지가 없습니다 (생활밀착형에 가까움)")
+    else:
+        tourism_col, _blank_col1, _blank_col2 = st.columns(3)
+        kpi_card(tourism_col, "관광지", f"{tourism_count}", "개", "lavender")
+
+        spot_names = tourism_nearby["tourism"]["name"].tolist()
+        shown = spot_names[:10]
+        more_suffix = f" 외 {len(spot_names) - 10}곳" if len(spot_names) > 10 else ""
+        st.caption(f"📍 {', '.join(shown)}{more_suffix}")
+
+    st.subheader("생활권 주변 시설 (카카오)")
+
+    kakao_col1, kakao_col2, kakao_col3, kakao_col4 = st.columns(4)
+    kpi_card(kakao_col1, "관광명소", f"{kakao_nearby['관광명소']['count']}", "개", "teal")
+    kpi_card(kakao_col2, "키즈카페 (경쟁시설)", f"{kakao_nearby['키즈카페']['count']}", "개", "rose")
+    kpi_card(kakao_col3, "문화체험", f"{kakao_nearby['문화체험']['count']}", "개", "violet")
+    kpi_card(kakao_col4, "집객시설", f"{kakao_nearby['집객시설']['count']}", "개", "tangerine")
+
+    st.caption("※ 카카오 실시간 검색 결과이며, 앞의 인구/학교/도서관/관광지와 달리 매번 최신 상태를 반영합니다")
 
     st.subheader(f"생활권 포함 행정동 (총 {len(dongs)}개)")
     if dongs.empty:

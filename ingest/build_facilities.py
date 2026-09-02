@@ -1,4 +1,4 @@
-"""전국 학교/도서관 표준데이터를 정제해서 필요한 컬럼만 저장하는 1회성 스크립트.
+"""전국 학교/도서관/관광지 표준데이터를 정제해서 필요한 컬럼만 저장하는 1회성 스크립트.
 
 실행: python ingest/build_facilities.py
 """
@@ -13,6 +13,9 @@ SCHOOLS_PROCESSED_PATH = "data/processed/schools.parquet"
 
 LIBRARIES_RAW_PATH = "data/raw/libraries.csv"
 LIBRARIES_PROCESSED_PATH = "data/processed/libraries.parquet"
+
+TOURISM_RAW_PATH = "data/raw/tourism.csv"
+TOURISM_PROCESSED_PATH = "data/processed/tourism.parquet"
 
 VALID_LAT_RANGE = (33, 39)
 VALID_LON_RANGE = (124, 132)
@@ -43,6 +46,14 @@ LIBRARY_GROUP_MAP = {
     "작은도서관": "작은도서관",
 }
 LIBRARY_GROUP_DEFAULT = "기타"  # 학교/전문/대학/장애인도서관 등
+
+TOURISM_COLUMN_MAP = {
+    "관광지명": "name",
+    "관광지구분": "category",
+    "소재지도로명주소": "address",
+    "위도": "lat",
+    "경도": "lon",
+}
 
 # Windows 콘솔에서 한글 출력이 깨지는 것을 방지
 if hasattr(sys.stdout, "reconfigure"):
@@ -88,6 +99,11 @@ def build_libraries(raw_path=LIBRARIES_RAW_PATH):
     return df
 
 
+def build_tourism(raw_path=TOURISM_RAW_PATH):
+    """관광지 위치 데이터를 정제한다."""
+    return _read_valid_coords(raw_path, TOURISM_COLUMN_MAP)
+
+
 def save_processed(df, out_path):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     df.to_parquet(out_path, index=False)
@@ -116,6 +132,18 @@ def main():
         print(libraries["group"].value_counts())
         print("\n샘플 5행:")
         print(libraries.head())
+
+    print("\n" + "=" * 40 + "\n")
+
+    tourism = build_tourism()
+    if tourism is not None:
+        out_path = save_processed(tourism, TOURISM_PROCESSED_PATH)
+        print(f"저장 완료: {out_path}")
+        print(f"\n관광지 개수: {len(tourism)}개")
+        print("\n구분별 개수:")
+        print(tourism["category"].value_counts())
+        print("\n샘플 5행:")
+        print(tourism.head())
 
 
 if __name__ == "__main__":

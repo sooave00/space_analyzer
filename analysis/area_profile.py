@@ -9,6 +9,7 @@ import sys
 import pandas as pd
 
 from analysis.living_area import _haversine_km
+from services.kakao_service import search_places_nearby
 
 POPULATION_PATH = "data/processed/population.parquet"
 MAPPING_PATH = "data/reference/adm_cd_mapping.csv"
@@ -17,6 +18,16 @@ SCHOOL_LEVELS = ["초등학교", "중학교", "고등학교"]
 
 LIBRARIES_PATH = "data/processed/libraries.parquet"
 LIBRARY_GROUPS = ["주요도서관", "작은도서관", "기타"]
+
+TOURISM_PATH = "data/processed/tourism.parquet"
+
+# 카카오 키워드 검색용 카테고리별 검색어 (카테고리 하나에 여러 키워드로 검색 후 합침)
+KAKAO_CATEGORY_KEYWORDS = {
+    "관광명소": ["관광명소", "공원", "해수욕장"],
+    "키즈카페": ["키즈카페", "실내놀이터"],
+    "문화체험": ["박물관", "과학관", "미술관", "문화센터"],
+    "집객시설": ["대형카페", "쇼핑몰"],
+}
 
 # Windows 콘솔에서 한글 출력이 깨지는 것을 방지
 if hasattr(sys.stdout, "reconfigure"):
@@ -114,6 +125,57 @@ def get_libraries_in_circle(center_lat, center_lon, radius_km, libraries_path=LI
     return {"counts": counts, "libraries": in_circle}
 
 
+def get_tourism_in_circle(center_lat, center_lon, radius_km, tourism_path=TOURISM_PATH):
+    """생활권 원 안에 있는 관광지를 거리순으로 정리해서 반환한다.
+
+    반환: dict
+      - count: 개수
+      - tourism: DataFrame (name, category, lat, lon, distance_km), 거리 가까운 순 정렬
+    """
+    tourism = pd.read_parquet(tourism_path)
+
+    distance_km = _haversine_km(center_lat, center_lon, tourism["lat"].values, tourism["lon"].values)
+    tourism = tourism.assign(distance_km=distance_km)
+
+    in_circle = tourism[tourism["distance_km"] <= radius_km].sort_values("distance_km").reset_index(drop=True)
+
+    return {"count": len(in_circle), "tourism": in_circle}
+
+
+def get_nearby_facilities_kakao(center_lat, center_lon, radius_m):
+    """카카오 키워드 검색으로 기준점 주변 4개 카테고리 시설을 모아서 반환한다.
+
+    카테고리별로 여러 키워드를 검색해서 합치고, (이름, 좌표) 기준 중복을 제거한 뒤
+    카카오가 가끔 주는 반경 밖 결과를 distance 기준으로 걸러낸다.
+
+    반환: {카테고리: {"count": N, "places": [(이름, 카테고리명, 주소, 위도, 경도, 거리), ...]}}
+    각 카테고리의 places는 거리 가까운 순으로 정렬된다.
+    """
+    result = {}
+
+    for category, keywords in KAKAO_CATEGORY_KEYWORDS.items():
+        seen = set()
+        places = []
+
+        for keyword in keywords:
+            for place in search_places_nearby(keyword, center_lat, center_lon, radius_m):
+                place_name, category_name, address_name, lat, lon, distance = place
+
+                if distance is None or distance > radius_m:
+                    continue
+
+                dedup_key = (place_name, round(lat, 6), round(lon, 6))
+                if dedup_key in seen:
+                    continue
+                seen.add(dedup_key)
+                places.append(place)
+
+        places.sort(key=lambda p: p[5])
+        result[category] = {"count": len(places), "places": places}
+
+    return result
+
+
 if __name__ == "__main__":
     from analysis.living_area import get_dongs_in_circle
 
@@ -144,3 +206,22 @@ if __name__ == "__main__":
           f"작은도서관 {libraries['counts']['작은도서관']}개 / 기타 {libraries['counts']['기타']}개")
     print("\n가까운 순 10개:")
     print(libraries["libraries"].head(10))
+
+    tourism = get_tourism_in_circle(center_lat, center_lon, radius_km)
+    print(f"\n생활권 관광지: {tourism['count']}개")
+    print("\n가까운 순 10개:")
+    print(tourism["tourism"].head(10))
+
+    print("\n" + "=" * 40)
+    print("카카오 키워드 검색 - 포항시청 반경 5000m")
+    print("=" * 40)
+
+    nearby = get_nearby_facilities_kakao(36.019, 129.343, 5000)
+    for category, data in nearby.items():
+        print(f"\n[{category}] {data['count']}개")
+        for place_name, category_name, address_name, lat, lon, distance in data["places"][:3]:
+            print(f"  - {place_name} ({category_name}) {address_name} - {distance:.0f}m")
+
+    tourist_spot_names = [p[0] for p in nearby["관광명소"]["places"]]
+    found = any("환호해맞이공원" in n for n in tourist_spot_names)
+    print(f"\n환호해맞이공원 포함 여부: {found}")
