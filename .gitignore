@@ -1,0 +1,24 @@
+# Environment
+.venv/
+.env
+
+# Data
+data/raw/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+
+# Claude Code (local-only settings)
+.claude/settings.local.json
