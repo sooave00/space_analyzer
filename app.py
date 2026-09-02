@@ -9,7 +9,7 @@ import folium
 import streamlit as st
 from streamlit_folium import st_folium
 
-from analysis.area_profile import get_living_area_population
+from analysis.area_profile import get_facilities_in_circle, get_living_area_population
 from analysis.living_area import calc_radius_km, get_dong_geometries, get_dongs_in_circle
 from services.kakao_service import find_location
 
@@ -106,8 +106,13 @@ st.markdown(
         font-weight: 700;
         line-height: 1.2;
     }
+    .kpi-green {
+        background: linear-gradient(135deg, #EFF5EE 0%, #E3EDE0 100%);
+        border: 1px solid #D6E6D2;
+    }
     .kpi-blue .kpi-value { color: #3E7C91; }
     .kpi-pink .kpi-value { color: #C97B8E; }
+    .kpi-green .kpi-value { color: #5C8A6B; }
     .kpi-unit {
         font-family: 'Noto Sans KR', sans-serif;
         font-size: 1.05rem;
@@ -195,6 +200,7 @@ if selected:
 
     dongs = get_dongs_in_circle(lat, lon, radius_km)
     dong_geometries = get_dong_geometries(dongs["ADM_CD"].tolist())
+    facilities = get_facilities_in_circle(lat, lon, radius_km)
 
     m = folium.Map(location=[lat, lon], zoom_start=13)
 
@@ -238,14 +244,27 @@ if selected:
             tooltip=folium.GeoJsonTooltip(fields=["ADM_NM"], aliases=["행정동"]),
         ).add_to(m)
 
+    school_colors = {"초등학교": "#4C9A8E", "중학교": "#7B6FA8", "고등학교": "#C97B4A"}
+    for _, school in facilities["schools"].iterrows():
+        folium.CircleMarker(
+            location=[school["lat"], school["lon"]],
+            radius=5,
+            color=school_colors.get(school["school_level"], "#8A8178"),
+            fill=True,
+            fill_opacity=0.85,
+            weight=1,
+            tooltip=school["school_name"],
+        ).add_to(m)
+
     # 반경이 화면에 딱 맞게 보이도록 위도/경도 범위를 계산해서 자동 줌 조정
     delta_lat = radius_km / 111
     delta_lon = radius_km / (111 * math.cos(math.radians(lat)))
     bounds = [[lat - delta_lat, lon - delta_lon], [lat + delta_lat, lon + delta_lon]]
     m.fit_bounds(bounds)
 
-    st_folium(m, height=500, use_container_width=True)
+    st_folium(m, height=420, use_container_width=True)
     st.caption(f"📍 직선거리 기준 약 {radius_km:.1f} km 범위 (실제 도로 이동거리와 다를 수 있음)")
+    st.caption("🟢 초등학교 · 🟣 중학교 · 🟠 고등학교")
 
     st.subheader("생활권 인구")
 
@@ -278,6 +297,14 @@ if selected:
         st.warning(
             f"일부 동은 최근 행정구역 개편으로 인구 데이터 미포함 ({len(profile['unmatched'])}개)"
         )
+
+    st.subheader("생활권 교육시설")
+
+    counts = facilities["counts"]
+    edu_col1, edu_col2, edu_col3 = st.columns(3)
+    kpi_card(edu_col1, "초등학교", f"{counts['초등학교']}", "개", "green")
+    kpi_card(edu_col2, "중학교", f"{counts['중학교']}", "개", "green")
+    kpi_card(edu_col3, "고등학교", f"{counts['고등학교']}", "개", "green")
 
     st.subheader(f"생활권 포함 행정동 (총 {len(dongs)}개)")
     if dongs.empty:

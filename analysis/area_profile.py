@@ -8,8 +8,12 @@ import sys
 
 import pandas as pd
 
+from analysis.living_area import _haversine_km
+
 POPULATION_PATH = "data/processed/population.parquet"
 MAPPING_PATH = "data/reference/adm_cd_mapping.csv"
+SCHOOLS_PATH = "data/processed/schools.parquet"
+SCHOOL_LEVELS = ["초등학교", "중학교", "고등학교"]
 
 # Windows 콘솔에서 한글 출력이 깨지는 것을 방지
 if hasattr(sys.stdout, "reconfigure"):
@@ -64,10 +68,30 @@ def get_living_area_population(dongs, population_path=POPULATION_PATH, mapping_p
     }
 
 
+def get_facilities_in_circle(center_lat, center_lon, radius_km, schools_path=SCHOOLS_PATH):
+    """생활권 원 안에 있는 학교를 학교급별로 정리해서 반환한다.
+
+    반환: dict
+      - counts: {"초등학교": N, "중학교": N, "고등학교": N}
+      - schools: DataFrame (school_name, school_level, lat, lon, distance_km), 거리 가까운 순 정렬
+    """
+    schools = pd.read_parquet(schools_path)
+
+    distance_km = _haversine_km(center_lat, center_lon, schools["lat"].values, schools["lon"].values)
+    schools = schools.assign(distance_km=distance_km)
+
+    in_circle = schools[schools["distance_km"] <= radius_km].sort_values("distance_km").reset_index(drop=True)
+
+    level_counts = in_circle["school_level"].value_counts()
+    counts = {level: int(level_counts.get(level, 0)) for level in SCHOOL_LEVELS}
+
+    return {"counts": counts, "schools": in_circle}
+
+
 if __name__ == "__main__":
     from analysis.living_area import get_dongs_in_circle
 
-    center_lat, center_lon, radius_km = 36.019, 129.343, 6.5
+    center_lat, center_lon, radius_km = 36.019, 129.343, 10.0
 
     dongs = get_dongs_in_circle(center_lat, center_lon, radius_km)
     profile = get_living_area_population(dongs)
@@ -82,3 +106,9 @@ if __name__ == "__main__":
         print(f"\n인구 미매칭 행정동 {len(profile['unmatched'])}개:")
         for adm_cd, adm_nm in profile["unmatched"]:
             print(f"  {adm_cd}  {adm_nm}")
+
+    facilities = get_facilities_in_circle(center_lat, center_lon, radius_km)
+    print(f"\n생활권 학교: 초 {facilities['counts']['초등학교']}개 / "
+          f"중 {facilities['counts']['중학교']}개 / 고 {facilities['counts']['고등학교']}개")
+    print("\n가까운 순 10개:")
+    print(facilities["schools"].head(10))
