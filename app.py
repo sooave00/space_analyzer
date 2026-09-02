@@ -11,6 +11,7 @@ from folium.plugins import MarkerCluster
 from streamlit_folium import folium_static
 
 from analysis.area_profile import (
+    get_closed_schools_in_circle,
     get_facilities_in_circle,
     get_libraries_in_circle,
     get_living_area_population,
@@ -141,6 +142,10 @@ st.markdown(
         background: linear-gradient(135deg, #FBEEDF 0%, #F6E0C7 100%);
         border: 1px solid #ECCB9E;
     }
+    .kpi-red {
+        background: linear-gradient(135deg, #FBEAE9 0%, #F6D6D4 100%);
+        border: 2px solid #D9534F;
+    }
     .kpi-blue .kpi-value { color: #3E7C91; }
     .kpi-pink .kpi-value { color: #C97B8E; }
     .kpi-green .kpi-value { color: #5C8A6B; }
@@ -150,6 +155,7 @@ st.markdown(
     .kpi-rose .kpi-value { color: #C94D63; }
     .kpi-violet .kpi-value { color: #6F4F96; }
     .kpi-tangerine .kpi-value { color: #B87332; }
+    .kpi-red .kpi-value { color: #C0392B; }
     .kpi-unit {
         font-family: 'Noto Sans KR', sans-serif;
         font-size: 1.05rem;
@@ -250,6 +256,7 @@ if selected:
     facilities = get_facilities_in_circle(lat, lon, radius_km)
     libraries_nearby = get_libraries_in_circle(lat, lon, radius_km)
     tourism_nearby = get_tourism_in_circle(lat, lon, radius_km)
+    closed_schools_nearby = get_closed_schools_in_circle(lat, lon, radius_km)
 
     radius_m = min(radius_km * 1000, 20000)
     kakao_cache = st.session_state.setdefault("kakao_cache", {})
@@ -259,15 +266,16 @@ if selected:
             kakao_cache[kakao_cache_key] = get_nearby_facilities_kakao(lat, lon, radius_m)
     kakao_nearby = kakao_cache[kakao_cache_key]
 
-    st.caption("지도에 표시할 시설 (기본: 학교·도서관만 켜짐)")
-    tg1, tg2, tg3, tg4, tg5, tg6 = st.columns(6)
+    st.caption("지도에 표시할 시설 (기본: 학교·도서관·폐교만 켜짐)")
+    tg1, tg2, tg3, tg4, tg5, tg6, tg7 = st.columns(7)
     show_layers = {
         "학교": tg1.checkbox("🏫 학교", value=True, key="show_school"),
         "도서관": tg2.checkbox("📚 도서관", value=True, key="show_library"),
-        "관광명소": tg3.checkbox("🎡 관광명소", value=False, key="show_kakao_tourist"),
-        "키즈카페": tg4.checkbox("🧸 키즈카페", value=False, key="show_kakao_kids"),
-        "문화체험": tg5.checkbox("🏛️ 문화체험", value=False, key="show_kakao_culture"),
-        "집객시설": tg6.checkbox("🛍️ 집객시설", value=False, key="show_kakao_crowd"),
+        "폐교": tg3.checkbox("🏚️ 폐교", value=True, key="show_closed_school"),
+        "관광명소": tg4.checkbox("🎡 관광명소", value=False, key="show_kakao_tourist"),
+        "키즈카페": tg5.checkbox("🧸 키즈카페", value=False, key="show_kakao_kids"),
+        "문화체험": tg6.checkbox("🏛️ 문화체험", value=False, key="show_kakao_culture"),
+        "집객시설": tg7.checkbox("🛍️ 집객시설", value=False, key="show_kakao_crowd"),
     }
 
     m = folium.Map(location=[lat, lon], zoom_start=13)
@@ -334,6 +342,42 @@ if selected:
                 icon=emoji_icon("📚"),
             ).add_to(library_cluster)
 
+    # 미활용 폐교는 "사업 후보지"라 눈에 띄게 강조 (클러스터에 묻히지 않도록 항상 개별 표시)
+    if show_layers["폐교"]:
+        unused_icon_html = (
+            '<div style="'
+            "width: 30px; height: 30px;"
+            "background-color: #F3D4D4;"
+            "border: 2px solid #D9534F;"
+            "border-radius: 50%;"
+            "display: flex; align-items: center; justify-content: center;"
+            "font-size: 17px; line-height: 1;"
+            'box-shadow: 0 2px 8px rgba(217, 83, 79, 0.55);">🏚️</div>'
+        )
+        unused_icon = folium.DivIcon(html=unused_icon_html, icon_size=(30, 30), icon_anchor=(15, 15))
+        muted_icon_html = '<div style="font-size: 20px; line-height: 1; opacity: 0.4;">🏫</div>'
+        muted_icon = folium.DivIcon(html=muted_icon_html, icon_size=(24, 24), icon_anchor=(12, 20))
+
+        closed_schools_df = closed_schools_nearby["closed_schools"]
+        unused_df = closed_schools_df[closed_schools_df["usage_status"] == "미활용"]
+        other_df = closed_schools_df[closed_schools_df["usage_status"] != "미활용"]
+
+        for _, school in unused_df.iterrows():
+            folium.Marker(
+                location=[school["lat"], school["lon"]],
+                tooltip=f"{school['name']} (미활용, {school['year']}년 폐교)",
+                icon=unused_icon,
+            ).add_to(m)
+
+        if not other_df.empty:
+            other_cluster = MarkerCluster(name="폐교(대부/자체활용)").add_to(m)
+            for _, school in other_df.iterrows():
+                folium.Marker(
+                    location=[school["lat"], school["lon"]],
+                    tooltip=f"{school['name']} ({school['usage_status']}, {school['year']}년 폐교)",
+                    icon=muted_icon,
+                ).add_to(other_cluster)
+
     # 공식 지정 관광지(STEP 5-C)는 항상 표시 - 카카오 관광명소와 구분되는 별도 이모지
     if not tourism_nearby["tourism"].empty:
         tourism_cluster = MarkerCluster(name="관광지(공식)").add_to(m)
@@ -372,7 +416,8 @@ if selected:
     folium_static(m, width=None, height=420)
     st.caption(f"📍 직선거리 기준 약 {radius_km:.1f} km 범위 (실제 도로 이동거리와 다를 수 있음)")
     st.caption(
-        "🏫 학교 · 📚 도서관 · 🏞️ 관광지(공식) 　 카카오 실시간: 🎡 관광명소 · 🧸 키즈카페 · 🏛️ 문화체험 · 🛍️ 집객시설"
+        "🏫 학교 · 📚 도서관 · 🏞️ 관광지(공식) · 🏚️ 폐교(미활용, 강조) 　 "
+        "카카오 실시간: 🎡 관광명소 · 🧸 키즈카페 · 🏛️ 문화체험 · 🛍️ 집객시설"
     )
     st.caption("숫자 원은 확대하면 개별 마커로 펼쳐지는 클러스터입니다")
 
@@ -415,6 +460,27 @@ if selected:
     kpi_card(edu_col1, "초등학교", f"{counts['초등학교']}", "개", "green")
     kpi_card(edu_col2, "중학교", f"{counts['중학교']}", "개", "green")
     kpi_card(edu_col3, "고등학교", f"{counts['고등학교']}", "개", "green")
+
+    st.subheader("생활권 폐교 (활용 검토)")
+
+    closed_counts = closed_schools_nearby["counts"]
+    closed_total = sum(closed_counts.values())
+
+    if closed_total == 0:
+        st.info("생활권 내 폐교 없음")
+    else:
+        closed_col1, closed_col2 = st.columns(2)
+        kpi_card(closed_col1, "전체 폐교", f"{closed_total}", "개", "amber")
+        kpi_card(closed_col2, "미활용 (사업 후보)", f"{closed_counts['미활용']}", "개", "red")
+        st.caption(f"대부 {closed_counts['대부']}개 · 자체활용 {closed_counts['자체활용']}개")
+
+        if closed_counts["미활용"] > 0:
+            unused_names = closed_schools_nearby["closed_schools"].loc[
+                closed_schools_nearby["closed_schools"]["usage_status"] == "미활용", "name"
+            ].tolist()
+            shown = unused_names[:10]
+            more_suffix = f" 외 {len(unused_names) - 10}곳" if len(unused_names) > 10 else ""
+            st.caption(f"🏚️ 미활용: {', '.join(shown)}{more_suffix}")
 
     st.subheader("생활권 문화시설")
 

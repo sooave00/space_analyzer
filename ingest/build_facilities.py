@@ -1,12 +1,16 @@
-"""전국 학교/도서관/관광지 표준데이터를 정제해서 필요한 컬럼만 저장하는 1회성 스크립트.
+"""전국 학교/도서관/관광지/폐교 표준데이터를 정제해서 필요한 컬럼만 저장하는 1회성 스크립트.
 
-실행: python ingest/build_facilities.py
+실행: python -m ingest.build_facilities
+(services.kakao_service를 import하므로 python ingest/build_facilities.py로 직접 실행하면 안 됨)
 """
 
 import os
 import sys
+import time
 
 import pandas as pd
+
+from services.kakao_service import address_to_coord
 
 SCHOOLS_RAW_PATH = "data/raw/schools.csv"
 SCHOOLS_PROCESSED_PATH = "data/processed/schools.parquet"
@@ -54,6 +58,19 @@ TOURISM_COLUMN_MAP = {
     "위도": "lat",
     "경도": "lon",
 }
+
+CLOSED_SCHOOLS_RAW_PATH = "data/raw/closed_schools.csv"
+CLOSED_SCHOOLS_PROCESSED_PATH = "data/processed/closed_schools.parquet"
+
+CLOSED_SCHOOL_COLUMN_MAP = {
+    "폐교명": "name",
+    "학교급구분명": "grade",
+    "활용현황구분명": "usage_status",
+    "폐교연도": "year",
+}
+
+GEOCODE_REQUEST_DELAY_SEC = 0.05
+GEOCODE_PROGRESS_INTERVAL = 100
 
 # Windows 콘솔에서 한글 출력이 깨지는 것을 방지
 if hasattr(sys.stdout, "reconfigure"):
@@ -104,6 +121,58 @@ def build_tourism(raw_path=TOURISM_RAW_PATH):
     return _read_valid_coords(raw_path, TOURISM_COLUMN_MAP)
 
 
+def build_closed_schools(raw_path=CLOSED_SCHOOLS_RAW_PATH):
+    """폐교 데이터를 읽어 주소를 카카오 API로 좌표 변환한다.
+
+    좌표가 원본에 없어서 행마다 카카오 주소검색을 호출한다 (1,194건 기준 수 분 소요, 1회성).
+    도로명주소가 없으면 지번주소로 대체하고, 변환 실패한 주소는 건너뛴다.
+    """
+    try:
+        df = pd.read_csv(raw_path, encoding="cp949")
+    except FileNotFoundError:
+        print(f"파일을 찾을 수 없습니다: {raw_path}")
+        return None
+    except Exception as e:
+        print(f"CSV를 읽는 중 오류가 발생했습니다: {e}")
+        return None
+
+    df = df.rename(columns=CLOSED_SCHOOL_COLUMN_MAP)
+    df["address"] = df["소재지도로명주소"].fillna(df["소재지지번주소"])
+
+    total = len(df)
+    print(f"총 {total}개 폐교 주소를 카카오로 좌표 변환합니다 (수 분 소요)...")
+
+    lats = []
+    lons = []
+    success = 0
+    fail = 0
+
+    for i, address in enumerate(df["address"], start=1):
+        result = address_to_coord(address)
+        if result:
+            lat, lon, _refined_address = result
+            lats.append(lat)
+            lons.append(lon)
+            success += 1
+        else:
+            lats.append(None)
+            lons.append(None)
+            fail += 1
+
+        if i % GEOCODE_PROGRESS_INTERVAL == 0 or i == total:
+            print(f"  진행: {i}/{total} (성공 {success}, 실패 {fail})")
+
+        time.sleep(GEOCODE_REQUEST_DELAY_SEC)
+
+    print(f"\n좌표 변환 완료: 성공 {success}개 / 실패 {fail}개 (전체 {total}개)")
+
+    df["lat"] = lats
+    df["lon"] = lons
+
+    result_df = df[df["lat"].notna()][["name", "grade", "usage_status", "year", "address", "lat", "lon"]]
+    return result_df.reset_index(drop=True)
+
+
 def save_processed(df, out_path):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     df.to_parquet(out_path, index=False)
@@ -144,6 +213,21 @@ def main():
         print(tourism["category"].value_counts())
         print("\n샘플 5행:")
         print(tourism.head())
+
+    print("\n" + "=" * 40 + "\n")
+
+    if os.path.exists(CLOSED_SCHOOLS_PROCESSED_PATH):
+        print(f"{CLOSED_SCHOOLS_PROCESSED_PATH} 이미 존재합니다 (카카오 좌표 변환은 1회성이라 건너뜁니다)")
+    else:
+        closed_schools = build_closed_schools()
+        if closed_schools is not None:
+            out_path = save_processed(closed_schools, CLOSED_SCHOOLS_PROCESSED_PATH)
+            print(f"저장 완료: {out_path}")
+            print(f"\n폐교 개수: {len(closed_schools)}개")
+            print("\n활용현황별 개수:")
+            print(closed_schools["usage_status"].value_counts())
+            print("\n샘플 5행:")
+            print(closed_schools.head())
 
 
 if __name__ == "__main__":

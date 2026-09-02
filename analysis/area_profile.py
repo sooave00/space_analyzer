@@ -21,6 +21,9 @@ LIBRARY_GROUPS = ["주요도서관", "작은도서관", "기타"]
 
 TOURISM_PATH = "data/processed/tourism.parquet"
 
+CLOSED_SCHOOLS_PATH = "data/processed/closed_schools.parquet"
+CLOSED_SCHOOL_USAGE_STATUSES = ["미활용", "대부", "자체활용"]
+
 # 카카오 키워드 검색용 카테고리별 검색어 (카테고리 하나에 여러 키워드로 검색 후 합침)
 KAKAO_CATEGORY_KEYWORDS = {
     "관광명소": ["관광명소", "공원", "해수욕장"],
@@ -142,6 +145,35 @@ def get_tourism_in_circle(center_lat, center_lon, radius_km, tourism_path=TOURIS
     return {"count": len(in_circle), "tourism": in_circle}
 
 
+def get_closed_schools_in_circle(center_lat, center_lon, radius_km, closed_schools_path=CLOSED_SCHOOLS_PATH):
+    """생활권 원 안에 있는 폐교를 활용현황별(미활용/대부/자체활용)로 정리해서 반환한다.
+
+    미활용 폐교는 사업 후보지 관점에서 특히 중요하다.
+
+    반환: dict
+      - counts: {"미활용": N, "대부": N, "자체활용": N}
+      - closed_schools: DataFrame (name, grade, usage_status, year, lat, lon, distance_km),
+        거리 가까운 순 정렬
+    """
+    closed_schools = pd.read_parquet(closed_schools_path)
+
+    distance_km = _haversine_km(
+        center_lat, center_lon, closed_schools["lat"].values, closed_schools["lon"].values
+    )
+    closed_schools = closed_schools.assign(distance_km=distance_km)
+
+    in_circle = (
+        closed_schools[closed_schools["distance_km"] <= radius_km]
+        .sort_values("distance_km")
+        .reset_index(drop=True)
+    )
+
+    status_counts = in_circle["usage_status"].value_counts()
+    counts = {status: int(status_counts.get(status, 0)) for status in CLOSED_SCHOOL_USAGE_STATUSES}
+
+    return {"counts": counts, "closed_schools": in_circle}
+
+
 def get_nearby_facilities_kakao(center_lat, center_lon, radius_m):
     """카카오 키워드 검색으로 기준점 주변 4개 카테고리 시설을 모아서 반환한다.
 
@@ -211,6 +243,11 @@ if __name__ == "__main__":
     print(f"\n생활권 관광지: {tourism['count']}개")
     print("\n가까운 순 10개:")
     print(tourism["tourism"].head(10))
+
+    closed_schools = get_closed_schools_in_circle(center_lat, center_lon, radius_km)
+    print(f"\n생활권 폐교: 미활용 {closed_schools['counts']['미활용']}개 / "
+          f"대부 {closed_schools['counts']['대부']}개 / 자체활용 {closed_schools['counts']['자체활용']}개")
+    print(closed_schools["closed_schools"].head(10))
 
     print("\n" + "=" * 40)
     print("카카오 키워드 검색 - 포항시청 반경 5000m")
