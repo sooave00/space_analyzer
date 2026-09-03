@@ -121,11 +121,14 @@ def build_tourism(raw_path=TOURISM_RAW_PATH):
     return _read_valid_coords(raw_path, TOURISM_COLUMN_MAP)
 
 
-def build_closed_schools(raw_path=CLOSED_SCHOOLS_RAW_PATH):
+def build_closed_schools(raw_path=CLOSED_SCHOOLS_RAW_PATH, progress_callback=None):
     """폐교 데이터를 읽어 주소를 카카오 API로 좌표 변환한다.
 
     좌표가 원본에 없어서 행마다 카카오 주소검색을 호출한다 (1,194건 기준 수 분 소요, 1회성).
     도로명주소가 없으면 지번주소로 대체하고, 변환 실패한 주소는 건너뛴다.
+
+    progress_callback(i, total, success, fail)이 주어지면 매 행마다 호출한다
+    (Streamlit 진행률 표시 등에 사용).
     """
     try:
         df = pd.read_csv(raw_path, encoding="cp949")
@@ -161,6 +164,9 @@ def build_closed_schools(raw_path=CLOSED_SCHOOLS_RAW_PATH):
 
         if i % GEOCODE_PROGRESS_INTERVAL == 0 or i == total:
             print(f"  진행: {i}/{total} (성공 {success}, 실패 {fail})")
+
+        if progress_callback is not None:
+            progress_callback(i, total, success, fail)
 
         time.sleep(GEOCODE_REQUEST_DELAY_SEC)
 

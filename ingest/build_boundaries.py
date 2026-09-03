@@ -21,12 +21,12 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 
-def load_boundaries():
+def load_boundaries(shp_path=SHP_PATH):
     """원본 shapefile을 읽는다. 실패 시 None을 반환한다."""
     try:
-        return gpd.read_file(SHP_PATH)
+        return gpd.read_file(shp_path)
     except FileNotFoundError:
-        print(f"파일을 찾을 수 없습니다: {SHP_PATH}")
+        print(f"파일을 찾을 수 없습니다: {shp_path}")
         return None
     except Exception as e:
         print(f"shapefile을 읽는 중 오류가 발생했습니다: {e}")
