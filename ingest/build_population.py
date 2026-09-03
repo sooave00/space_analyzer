@@ -15,6 +15,7 @@ import pandas as pd
 
 RAW_PATH_TEMPLATE = "data/raw/population_{base_ym}.csv"
 PROCESSED_PATH = "data/processed/population.parquet"
+SIGUNGU_NAMES_PATH = "data/reference/sigungu_names.csv"
 BASE_YM = "202608"
 
 ADM_CD_PATTERN = re.compile(r"\((\d{10})\)")
@@ -94,6 +95,39 @@ def save_processed(df, out_path=PROCESSED_PATH):
     return out_path
 
 
+def build_sigungu_names(base_ym=BASE_YM):
+    """원본 CSV의 시군구 합계 행에서 5자리 시군구코드-이름 쌍을 추출한다.
+
+    (읍면동 데이터는 동 이름만 있고 시군구 이름이 없어서, 원본의 시군구 합계 행
+    ("서울특별시 종로구 (1111000000)" 같은 행)에서 이름을 따로 뽑아둔다)
+    """
+    raw_path = RAW_PATH_TEMPLATE.format(base_ym=base_ym)
+    try:
+        df = pd.read_csv(raw_path, encoding="cp949", usecols=["행정구역"])
+    except FileNotFoundError:
+        print(f"파일을 찾을 수 없습니다: {raw_path}")
+        return None
+    except Exception as e:
+        print(f"CSV를 읽는 중 오류가 발생했습니다: {e}")
+        return None
+
+    df["adm_cd"] = df["행정구역"].str.extract(ADM_CD_PATTERN)
+    df["sigungu_nm"] = df["행정구역"].str.replace(ADM_CD_PATTERN, "", regex=True).str.strip()
+
+    is_sido = df["adm_cd"].str[2:] == "00000000"
+    is_sigungu = (df["adm_cd"].str[-5:] == "00000") & ~is_sido
+
+    result = df[is_sigungu][["adm_cd", "sigungu_nm"]].copy()
+    result["sigungu_cd"] = result["adm_cd"].str[:5]
+    return result[["sigungu_cd", "sigungu_nm"]].reset_index(drop=True)
+
+
+def save_sigungu_names(df, out_path=SIGUNGU_NAMES_PATH):
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    df.to_csv(out_path, index=False, encoding="utf-8-sig")
+    return out_path
+
+
 def main():
     df = load_and_clean()
     if df is None:
@@ -106,6 +140,15 @@ def main():
     print("\n상위 5행:")
     print(df.head())
     print(f"\ntotal 합계: {df['total'].sum():,}명")
+
+    print("\n" + "=" * 40 + "\n")
+
+    sigungu_names = build_sigungu_names()
+    if sigungu_names is not None:
+        out_path = save_sigungu_names(sigungu_names)
+        print(f"저장 완료: {out_path}")
+        print(f"\n시군구 개수: {len(sigungu_names)}개")
+        print(sigungu_names.head())
 
 
 if __name__ == "__main__":
