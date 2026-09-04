@@ -3,7 +3,9 @@
 실행: python services/kakao_service.py
 """
 
+import html
 import os
+import re
 import sys
 
 import requests
@@ -11,6 +13,10 @@ from dotenv import load_dotenv
 
 ADDRESS_API_URL = "https://dapi.kakao.com/v2/local/search/address.json"
 KEYWORD_API_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
+BLOG_SEARCH_URL = "https://dapi.kakao.com/v2/search/blog"
+CAFE_SEARCH_URL = "https://dapi.kakao.com/v2/search/cafe"
+
+TAG_PATTERN = re.compile(r"<[^>]+>")
 
 # Windows 콘솔에서 한글 출력이 깨지는 것을 방지
 if hasattr(sys.stdout, "reconfigure"):
@@ -124,6 +130,78 @@ def search_places_nearby(keyword, center_lat, center_lon, radius_m):
     ]
 
 
+def _clean_text(text):
+    """<b> 태그와 HTML 엔티티를 제거해서 깔끔한 텍스트로 만든다."""
+    return html.unescape(TAG_PATTERN.sub("", text))
+
+
+def _search_documents(url, query, size, page, name_field):
+    """블로그/카페 검색 공통 로직. 실패 시 None을 반환한다.
+
+    반환: {"total_count": N, "is_end": bool, "items": [{"title","contents","url",name_field}, ...]}
+    """
+    params = {"query": query, "size": min(size, 50), "sort": "accuracy", "page": page}
+    data = _request(url, params)
+    if data is None:
+        return None
+
+    items = [
+        {
+            "title": _clean_text(doc["title"]),
+            "contents": _clean_text(doc["contents"]),
+            "url": doc["url"],
+            name_field: doc.get(name_field, ""),
+        }
+        for doc in data.get("documents", [])
+    ]
+    meta = data.get("meta", {})
+
+    return {
+        "total_count": meta.get("total_count", 0),
+        "is_end": meta.get("is_end", True),
+        "items": items,
+    }
+
+
+def search_blog(query, size=50, page=1):
+    """카카오 블로그 검색. 실패 시 None을 반환한다.
+
+    반환: {"total_count", "is_end", "items": [{"title","contents","url","blogname"}, ...]}
+    """
+    return _search_documents(BLOG_SEARCH_URL, query, size, page, "blogname")
+
+
+def search_cafe(query, size=50, page=1):
+    """카카오 카페 검색. 실패 시 None을 반환한다.
+
+    반환: {"total_count", "is_end", "items": [{"title","contents","url","cafename"}, ...]}
+    """
+    return _search_documents(CAFE_SEARCH_URL, query, size, page, "cafename")
+
+
+def search_blog_all(query, max_docs=100):
+    """블로그 검색을 여러 페이지 모아서 최대 max_docs개까지 반환한다.
+
+    반환: [{"title","contents","url","blogname"}, ...] (실패/결과없음 시 빈 리스트)
+    """
+    all_items = []
+    page = 1
+
+    while len(all_items) < max_docs:
+        remaining = max_docs - len(all_items)
+        result = search_blog(query, size=min(50, remaining), page=page)
+        if result is None:
+            break
+
+        all_items.extend(result["items"])
+
+        if result["is_end"] or not result["items"]:
+            break
+        page += 1
+
+    return all_items[:max_docs]
+
+
 def find_location(text):
     """주소검색을 먼저 시도하고 실패하면 키워드검색을 시도한다.
 
@@ -165,3 +243,11 @@ if __name__ == "__main__":
     print(f"{len(nearby)}개 결과")
     for place_name, category_name, address_name, lat, lon, distance in nearby[:10]:
         print(f"  - {place_name} ({address_name}) 거리: {distance}m")
+
+    print("\n--- '경주 아이랑 가볼만한 곳' 블로그 검색 ---")
+    blog_result = search_blog("경주 아이랑 가볼만한 곳")
+    if blog_result:
+        print(f"total_count: {blog_result['total_count']:,}건")
+        print("\n상위 5개 글 제목:")
+        for item in blog_result["items"][:5]:
+            print(f"  - {item['title']}")
