@@ -43,8 +43,29 @@ DATA_STATUS_PATH = "data/processed/data_status.json"
 CYCLE_LABELS = {"monthly": "1개월", "biannual": "6개월", "yearly": "1년"}
 CYCLE_DAYS = {"monthly": 30, "biannual": 182, "yearly": 365}
 
+# Streamlit Community Cloud는 저장소를 /mount/src 아래에 배포한다.
+# DEPLOY_ENV를 직접 지정할 수도 있게 해서(예: 다른 호스팅) 판별을 명시적으로 덮어쓸 수 있다.
+CLOUD_MOUNT_PATH = "/mount/src"
+
+
+def is_cloud_environment():
+    """배포(웹) 환경이면 True. 로컬 실행이면 False."""
+    declared = os.getenv("DEPLOY_ENV", "").strip().lower()
+    if declared in {"cloud", "production", "prod"}:
+        return True
+    if declared in {"local", "dev", "development"}:
+        return False
+    return os.path.isdir(CLOUD_MOUNT_PATH)
+
+
 apply_theme()
 page_header("데이터 관리", "원본 데이터가 언제 적용됐고, 갱신이 필요한지 한눈에 확인")
+
+if is_cloud_environment():
+    st.warning(
+        "⚠️ 배포(웹) 환경에서는 업로드 갱신이 일시적이며, 앱 재시작 시 초기화됩니다. "
+        "실제 데이터 갱신은 로컬에서 하고 저장소에 반영해주세요."
+    )
 
 
 def load_data_status(path=DATA_STATUS_PATH):
