@@ -1,6 +1,8 @@
 """데이터 관리 - 원본 데이터 갱신 현황판 + 갱신 흐름(팝업).
 
-실행: streamlit run app.py (사이드바에서 "데이터 관리" 페이지로 이동)
+관리자용 설정 화면. 분석 기능이 쓰는 원본 데이터가 최신인지 확인하고 갱신한다.
+
+실행: streamlit run app.py (메뉴에서 "데이터 관리" 선택)
 """
 
 import io
@@ -34,100 +36,15 @@ from ingest.build_facilities import (
 from ingest.build_facilities import save_processed as save_facility
 from ingest.build_population import load_and_clean as load_clean_population
 from ingest.build_population import save_processed as save_population
+from views._theme import apply_theme, page_header
 
 DATA_STATUS_PATH = "data/processed/data_status.json"
 
 CYCLE_LABELS = {"monthly": "1개월", "biannual": "6개월", "yearly": "1년"}
 CYCLE_DAYS = {"monthly": 30, "biannual": 182, "yearly": 365}
 
-st.set_page_config(page_title="데이터 관리", layout="wide")
-
-st.markdown(
-    """
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700;800&family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap');
-
-    html, body, [class*="css"] {
-        font-family: 'Noto Sans KR', sans-serif;
-    }
-
-    .block-container {
-        padding-top: 3rem;
-        padding-bottom: 4rem;
-    }
-
-    h1, h2, h3 {
-        font-family: 'Nanum Myeongjo', serif !important;
-        color: #4A4238 !important;
-    }
-
-    .app-title {
-        font-family: 'Nanum Myeongjo', serif;
-        font-size: 2.6rem;
-        font-weight: 700;
-        color: #4A4238;
-        letter-spacing: 0.02em;
-        line-height: 1.3;
-        margin-bottom: 0.3rem;
-    }
-    .app-subtitle {
-        font-family: 'Noto Sans KR', sans-serif;
-        font-weight: 300;
-        color: #A79C8E;
-        font-size: 1rem;
-        letter-spacing: 0.04em;
-        line-height: 1.5;
-        margin-bottom: 2rem;
-    }
-
-    .status-card {
-        border-radius: 20px;
-        padding: 22px 24px;
-        box-shadow: 0 8px 22px rgba(168, 213, 226, 0.28);
-        margin-bottom: 0.8rem;
-        min-height: 168px;
-    }
-    .status-fresh {
-        background: linear-gradient(135deg, #EFF5EE 0%, #E3EDE0 100%);
-        border: 1px solid #D6E6D2;
-    }
-    .status-stale {
-        background: linear-gradient(135deg, #FBEAE9 0%, #F6D6D4 100%);
-        border: 2px solid #D9534F;
-    }
-    .status-name {
-        font-family: 'Nanum Myeongjo', serif;
-        font-size: 1.3rem;
-        font-weight: 700;
-        color: #4A4238;
-        margin-bottom: 6px;
-    }
-    .status-meta {
-        font-family: 'Noto Sans KR', sans-serif;
-        font-size: 0.9rem;
-        color: #8A8178;
-        margin-bottom: 4px;
-    }
-    .status-badge {
-        font-family: 'Noto Sans KR', sans-serif;
-        font-weight: 700;
-        font-size: 0.95rem;
-        margin-top: 8px;
-    }
-    .status-fresh .status-badge { color: #5C8A6B; }
-    .status-stale .status-badge { color: #C0392B; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    """
-    <div class="app-title">데이터 관리</div>
-    <div class="app-subtitle">원본 데이터가 언제 적용됐고, 갱신이 필요한지 한눈에 확인</div>
-    """,
-    unsafe_allow_html=True,
-)
+apply_theme()
+page_header("데이터 관리", "원본 데이터가 언제 적용됐고, 갱신이 필요한지 한눈에 확인")
 
 
 def load_data_status(path=DATA_STATUS_PATH):

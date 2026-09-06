@@ -4,9 +4,11 @@
 """
 
 import html
+import json
 import os
 import re
 import sys
+from datetime import date
 
 import requests
 from dotenv import load_dotenv
@@ -18,9 +20,53 @@ CAFE_SEARCH_URL = "https://dapi.kakao.com/v2/search/cafe"
 
 TAG_PATTERN = re.compile(r"<[^>]+>")
 
+# 카카오 API 일일 호출 한도 (앱 설정에 따라 다르므로, 실제 한도에 맞춰 조정해서 쓴다)
+DAILY_CALL_LIMIT = 100000
+USAGE_PATH = "data/reference/kakao_usage.json"
+
 # Windows 콘솔에서 한글 출력이 깨지는 것을 방지
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
+
+
+def _load_usage(path=USAGE_PATH):
+    """오늘자 호출 사용량을 읽는다. 날짜가 바뀌었으면 0부터 시작한다."""
+    today = date.today().isoformat()
+    try:
+        with open(path, encoding="utf-8") as f:
+            usage = json.load(f)
+        if usage.get("date") == today:
+            return usage
+    except (FileNotFoundError, json.JSONDecodeError):
+        pass
+    return {"date": today, "count": 0}
+
+
+def _record_call(path=USAGE_PATH):
+    """호출 1건을 기록한다 (날짜별 누적)."""
+    usage = _load_usage(path)
+    usage["count"] += 1
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(usage, f, ensure_ascii=False)
+    except OSError:
+        pass  # 사용량 기록 실패가 검색 자체를 막지 않도록 조용히 넘어간다
+    return usage
+
+
+def get_usage(path=USAGE_PATH):
+    """오늘 호출 사용량 현황을 반환한다.
+
+    반환: {"date", "count", "limit", "ratio"} (ratio는 한도 대비 사용 비율 0~1)
+    """
+    usage = _load_usage(path)
+    return {
+        "date": usage["date"],
+        "count": usage["count"],
+        "limit": DAILY_CALL_LIMIT,
+        "ratio": usage["count"] / DAILY_CALL_LIMIT if DAILY_CALL_LIMIT else 0,
+    }
 
 
 def _request(url, params):
@@ -36,6 +82,7 @@ def _request(url, params):
         return None
 
     headers = {"Authorization": f"KakaoAK {api_key}"}
+    _record_call()
 
     try:
         response = requests.get(url, headers=headers, params=params, timeout=10)

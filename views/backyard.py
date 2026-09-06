@@ -1,6 +1,6 @@
 """배후권 비교 - 거리 기반 방문 가능권 시군구를 추출해서 지표별로 비교한다.
 
-실행: streamlit run app.py (사이드바에서 "배후권 비교" 페이지로 이동)
+실행: streamlit run app.py (메뉴에서 "배후권 비교" 선택)
 """
 
 import streamlit as st
@@ -8,136 +8,21 @@ import streamlit as st
 from analysis.backyard import get_backyard_metrics
 from analysis.living_area import calc_radius_km
 from services.kakao_service import find_location
+from views._theme import apply_theme, page_header
 
-st.set_page_config(page_title="배후권 비교", layout="wide")
-
-st.markdown(
-    """
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Nanum+Myeongjo:wght@400;700;800&family=Noto+Sans+KR:wght@300;400;500;600;700&display=swap');
-
-    html, body, [class*="css"] {
-        font-family: 'Noto Sans KR', sans-serif;
-    }
-
-    .block-container {
-        padding-top: 3rem;
-        padding-bottom: 4rem;
-    }
-
-    h1, h2, h3 {
-        font-family: 'Nanum Myeongjo', serif !important;
-        color: #4A4238 !important;
-    }
-
-    .app-title {
-        font-family: 'Nanum Myeongjo', serif;
-        font-size: 2.6rem;
-        font-weight: 700;
-        color: #4A4238;
-        letter-spacing: 0.02em;
-        line-height: 1.3;
-        margin-bottom: 0.3rem;
-    }
-    .app-subtitle {
-        font-family: 'Noto Sans KR', sans-serif;
-        font-weight: 300;
-        color: #A79C8E;
-        font-size: 1rem;
-        letter-spacing: 0.04em;
-        line-height: 1.5;
-        margin-bottom: 2rem;
-    }
-
-    .highlight-line {
-        font-family: 'Nanum Myeongjo', serif;
-        font-size: 1.15rem;
-        font-weight: 700;
-        color: #C94D63;
-        background: linear-gradient(135deg, #FBEBEC 0%, #F6DBDD 100%);
-        border: 1px solid #F0C7CC;
-        border-radius: 14px;
-        padding: 14px 20px;
-        margin: 1rem 0 1.4rem;
-    }
-
-    .region-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-        gap: 1.2rem;
-        margin-bottom: 1rem;
-    }
-    .region-card {
-        border-radius: 20px;
-        padding: 24px 22px;
-        box-shadow: 0 8px 22px rgba(168, 213, 226, 0.28);
-        background: linear-gradient(135deg, #EAF5F8 0%, #DCEEF3 100%);
-        border: 1px solid #CDE7EE;
-    }
-    .region-card.top {
-        background: linear-gradient(135deg, #FBEBEC 0%, #F6DBDD 100%);
-        border: 2px solid #E0637A;
-    }
-    .region-rank {
-        font-family: 'Noto Sans KR', sans-serif;
-        font-size: 0.82rem;
-        font-weight: 600;
-        color: #8A8178;
-        margin-bottom: 4px;
-        letter-spacing: 0.02em;
-    }
-    .region-card.top .region-rank { color: #C94D63; }
-    .region-name {
-        font-family: 'Nanum Myeongjo', serif;
-        font-size: 1.2rem;
-        font-weight: 700;
-        color: #4A4238;
-        margin-bottom: 2px;
-    }
-    .region-distance {
-        font-size: 0.8rem;
-        color: #8A8178;
-        margin-bottom: 14px;
-    }
-    .region-main-label {
-        font-family: 'Noto Sans KR', sans-serif;
-        font-size: 0.85rem;
-        color: #8A8178;
-        margin-bottom: 2px;
-    }
-    .region-main-value {
-        font-family: 'Nanum Myeongjo', serif;
-        font-size: 2.4rem;
-        font-weight: 700;
-        line-height: 1.15;
-        color: #3E7C91;
-    }
-    .region-card.top .region-main-value { color: #C94D63; }
-    .region-main-unit {
-        font-family: 'Noto Sans KR', sans-serif;
-        font-size: 1rem;
-        font-weight: 400;
-        margin-left: 2px;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    """
-    <div class="app-title">배후권 비교</div>
-    <div class="app-subtitle">이 시설에 올 만한 지역들을 비교</div>
-    """,
-    unsafe_allow_html=True,
-)
+apply_theme()
+page_header("배후권 비교", "이 시설에 올 만한 지역들을 비교")
 
 st.warning(
     "⚠️ 이 결과는 실제 방문객 유입 데이터가 아니라, "
     "직선거리 기준으로 \"올 수 있을 만한\" 지역을 추정한 것입니다."
 )
 
-address = st.text_input("시설 주소 또는 장소명을 입력하세요", value="포항시청")
+st.markdown('<div class="search-section-label">위치 검색</div>', unsafe_allow_html=True)
+address = st.text_input(
+    "시설 주소 또는 장소명", value="포항시청", label_visibility="collapsed",
+    placeholder="시설 주소 또는 장소명을 입력하세요",
+)
 
 col1, col2 = st.columns([1, 2])
 minutes = col1.radio(
